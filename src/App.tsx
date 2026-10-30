@@ -35,6 +35,7 @@ import {
   generateTagsFromContent,
   generateNoteTitle,
   generateMocContent,
+  mocSummarizeStream,
   NoteInfo,
 } from './lib/gemini';
 import {
@@ -884,6 +885,84 @@ export default function App() {
     setPendingPrompt(null);
   }
 
+  function extractWikiLinks(text: string): string[] {
+    const result: string[] = [];
+    const re = /\[\[([^\]|#]+)(?:\|[^\]]*)?\]\]/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      const link = m[1].trim();
+      if (link) result.push(link);
+    }
+    return result;
+  }
+  function isMocNote(name: string): boolean {
+    const base = name.replace(/^.*\//, '').replace(/\.md$/i, '').toLowerCase();
+    return /\bmoc\b|index|map[\s_-]?of[\s_-]?content/i.test(base);
+  }
+  function findNoteByLink(link: string, allNotes: Note[]): Note | undefined {
+    const linkNorm = link.toLowerCase().replace(/\.md$/i, '');
+    return allNotes.find((n) => {
+      const full = n.name.replace(/\.md$/i, '').toLowerCase();
+      const short = n.name.replace(/^.*\//, '').replace(/\.md$/i, '').toLowerCase();
+      return full === linkNorm || short === linkNorm;
+    });
+  }
+  async function collectMocLeaves(startNote: Note, allNotes: Note[], maxDepth: number): Promise<{ name: string; content: string }[]> {
+    const visited = new Set<string>([startNote.name]);
+    const leaves: { name: string; content: string }[] = [];
+    async function traverse(note: Note, depth: number) {
+      const links = extractWikiLinks(note.content);
+      for (const link of links) {
+        const target = findNoteByLink(link, allNotes);
+        if (!target || visited.has(target.name)) continue;
+        visited.add(target.name);
+        if (isMocNote(target.name) && depth < maxDepth) {
+          await traverse(target, depth + 1);
+        } else if (!isMocNote(target.name)) {
+          leaves.push({ name: target.name, content: target.content });
+        }
+      }
+    }
+    await traverse(startNote, 1);
+    return leaves;
+  }
+
+  async function handleMocSummarize(depth: number) {
+    if (!noteTabSelectedNote || !config.geminiApiKey) return;
+    const mocTitle = noteTabSelectedNote.name.replace(/\.md$/i, '').replace(/^.*\//, '');
+    const userMsg = `「${mocTitle}」のMOCリンク先を再帰的にたどってまとめます（最大深さ: ${depth}）`;
+    const nextHistory: ChatMessage[] = [...chatHistory, { role: 'user', content: userMsg }];
+    setChatHistory(nextHistory);
+    setStreamedText('');
+    setIsGenerating(true);
+    try {
+      const leaves = await collectMocLeaves(noteTabSelectedNote, notes, depth);
+      if (leaves.length === 0) {
+        setChatHistory([...nextHistory, { role: 'model', content: '[[wikiリンク]] を持つノートが見つかりませんでした。' }]);
+        setIsGenerating(false);
+        return;
+      }
+      await mocSummarizeStream(
+        config.geminiApiKey,
+        mocTitle,
+        leaves,
+        (chunk) => setStreamedText((prev) => prev + chunk),
+        (fullText) => {
+          setChatHistory([...nextHistory, { role: 'model', content: fullText }]);
+          setStreamedText('');
+          setIsGenerating(false);
+        },
+        (err) => {
+          setIsGenerating(false);
+          alert(err instanceof Error ? err.message : String(err));
+        },
+      );
+    } catch (err) {
+      setIsGenerating(false);
+      alert(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   async function sendChat(prompt: string) {
     if (!config.geminiApiKey) {
       alert('設定画面でGemini APIキーを入力してください');
@@ -1037,6 +1116,7 @@ export default function App() {
             onAiAction={handleAiAction}
             onAddTag={(tag) => noteTabSelectedNote && updateTags(noteTabSelectedNote.name, noteTabContent, Array.from(new Set([...(noteTabSelectedNote.tags ?? []), tag.replace(/^#/, '')])))}
             onRemoveTag={(tag) => noteTabSelectedNote && updateTags(noteTabSelectedNote.name, noteTabContent, (noteTabSelectedNote.tags ?? []).filter((t) => t !== tag))}
+            onMocSummarize={handleMocSummarize}
           />
         )}
 

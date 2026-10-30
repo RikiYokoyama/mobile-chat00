@@ -75,6 +75,7 @@ export default function NoteScreen({
   onAiAction,
   onAddTag,
   onRemoveTag,
+  onMocSummarize,
 }: {
   notes: Note[];
   selectedNote: Note | null;
@@ -94,6 +95,7 @@ export default function NoteScreen({
   onAiAction: (action: 'title' | 'tags' | 'summary') => void;
   onAddTag: (tag: string) => void;
   onRemoveTag: (tag: string) => void;
+  onMocSummarize?: (depth: number) => void;
 }) {
   const existingNames = useMemo(
     () => new Set(notes.map(n => n.name.toLowerCase())),
@@ -103,6 +105,8 @@ export default function NoteScreen({
   const [editMode, setEditMode] = useState<'edit' | 'preview'>('preview');
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [showOutline, setShowOutline] = useState(false);
+  const [showMocSummaryModal, setShowMocSummaryModal] = useState(false);
+  const [mocSummaryDepth, setMocSummaryDepth] = useState(3);
   const [pickerView, setPickerView] = useState<'list' | 'tree'>('list');
   const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(new Set());
   const previewRef = useRef<HTMLDivElement>(null);
@@ -311,6 +315,12 @@ export default function NoteScreen({
             <>
               <div className="h-5 w-px shrink-0 bg-white/10" />
               <ToolbarButton icon={<Brackets className="h-4 w-4" />} label="[[リンク]]" onClick={wrapSelectionWithWikiLink} />
+            </>
+          )}
+          {onMocSummarize && (
+            <>
+              <div className="h-5 w-px shrink-0 bg-white/10" />
+              <ToolbarButton icon={<span className="text-[11px] font-medium text-indigo-400">🔗まとめ</span>} onClick={() => setShowMocSummaryModal(true)} disabled={isGenerating} label="" />
             </>
           )}
         </div>
@@ -663,6 +673,24 @@ export default function NoteScreen({
             </div>
           </div>
         </>
+      )}
+      {/* MOC再帰サマリーモーダル */}
+      {showMocSummaryModal && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 pb-safe" onClick={() => setShowMocSummaryModal(false)}>
+          <div className="w-full max-w-lg rounded-t-2xl border-t border-indigo-700/40 bg-[#101827] p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-1 h-1 w-12 self-center rounded-full bg-white/20 mx-auto" />
+            <h3 className="mt-3 mb-1 text-base font-semibold text-indigo-300">🔗 MOCリンク先をまとめる</h3>
+            <p className="mb-4 text-xs text-gray-400"><code className="text-indigo-300">[[wikiリンク]]</code> を再帰的にたどりAIでまとめます</p>
+            <label className="mb-4 block text-sm text-gray-300">
+              最大深さ: <span className="font-semibold text-indigo-300">{mocSummaryDepth}</span>
+              <input type="range" min={1} max={5} value={mocSummaryDepth} onChange={(e) => setMocSummaryDepth(Number(e.target.value))} className="mt-2 w-full" />
+            </label>
+            <button className="w-full rounded-xl bg-indigo-600 py-3 text-sm font-semibold text-white active:bg-indigo-500" onClick={() => { setShowMocSummaryModal(false); onMocSummarize?.(mocSummaryDepth); }}>
+              まとめを開始（結果はチャットへ）
+            </button>
+            <button className="mt-2 w-full rounded-xl border border-white/10 py-3 text-sm text-gray-400 active:bg-white/5" onClick={() => setShowMocSummaryModal(false)}>キャンセル</button>
+          </div>
+        </div>
       )}
     </div>
   );

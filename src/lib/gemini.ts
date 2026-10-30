@@ -20,6 +20,32 @@ export const SYSTEM_PROMPTS: Record<ChatMode, string> = {
   'long-doc': 'あなたは長文ドキュメント解析の専門家です。ノートコンテキストとして渡された文書全体（または会話に貼り付けられたテキスト）を精読し、ユーザーの指示に答えてください。\n\n【対応できる作業】\n- 要約・要点抽出（「要約して」「ポイントをまとめて」）\n- 質疑応答（「〇〇について教えて」）\n- 構造分析（「章ごとにまとめて」「目次を作って」）\n- 比較・評価（「メリット・デメリットを整理して」）\n- アクションアイテム抽出（「次にやることを箇条書きで」）\n\n【回答ルール】\n- 文書の具体的な箇所を引用して根拠を示す\n- ユーザーの指示に応じて出力の長さを調整する（要約なら簡潔に、詳細解説なら詳しく）\n- 重要な概念は [[キーワード]] 形式（Obsidian内部リンク）で出力する\n- 文書に記載のない事項は推測せず「文書中に記載なし」と明示する',
 };
 
+export async function mocSummarizeStream(
+  apiKey: string,
+  mocTitle: string,
+  collectedNotes: { name: string; content: string }[],
+  onChunk: (text: string) => void,
+  onComplete: (fullText: string) => void,
+  onError: (err: unknown) => void,
+): Promise<void> {
+  const sections = collectedNotes
+    .map(n => `## ${n.name.replace(/\.md$/i, '').replace(/^.*\//, '')}\n\n${n.content.slice(0, 3000)}`)
+    .join('\n\n---\n\n')
+    .slice(0, 80000);
+  const systemPrompt = 'あなたはObsidianノート知識ベースの分析専門家です。提供されたノート群を横断的に分析し、全体の知識を構造化してまとめてください。\n\n【出力ルール】\n- 共通テーマやトピックを見出し（##）でグループ化する\n- 各ノートの重要情報を要約し箇条書きで示す\n- ノート間の繋がりや関連性を明示する\n- 重要なキーワードは [[キーワード]] 形式でリンク化する\n- 最後に全体の洞察・まとめを記述する';
+  const userMessage = `「${mocTitle}」のMOCから収集した${collectedNotes.length}件のノートを分析してまとめてください:\n\n${sections}`;
+  const client = new GeminiClient(apiKey);
+  await client.chatStream(
+    [{ role: 'user', content: userMessage }],
+    systemPrompt,
+    'flash',
+    null,
+    onChunk,
+    onComplete,
+    onError,
+  );
+}
+
 export async function generateNoteTitle(apiKey: string, userPrompt: string, aiReply: string): Promise<string> {
   const prompt = `以下の会話から、Markdownのファイル名に適した短いタイトル（20文字以内、日本語可）を1行だけ出力してください。記号や説明は不要です。\n\nUser: ${userPrompt.slice(0, 300)}\nAI: ${aiReply.slice(0, 300)}`;
   try {
